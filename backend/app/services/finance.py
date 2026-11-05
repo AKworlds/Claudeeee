@@ -12,7 +12,7 @@ import json
 import sqlite3
 from collections import defaultdict
 from copy import deepcopy
-from datetime import date, timedelta
+from datetime import date, datetime, timedelta, timezone
 from typing import Any, Callable
 
 from ..config import _deep_merge, get_settings
@@ -50,7 +50,7 @@ def month_window(end: str, n: int) -> list[str]:
 def end_month(conn: sqlite3.Connection, today: date) -> str:
     """Latest month with any data across the finance tables, else today's month."""
     best = ""
-    for t in ("income", "transactions", "balances", "business", "business_payouts"):
+    for t in ("income", "income_entries", "transactions", "balances", "business", "business_payouts"):
         v = conn.execute(f"SELECT MAX(substr(date,1,7)) FROM {t}").fetchone()[0]
         best = max(best, v or "")
     return best or month_of(today)
@@ -63,7 +63,7 @@ def series_end(conn: sqlite3.Connection, today: date) -> str:
     if end >= cur:
         prev = month_add(cur, -1)
         has_prev = any(conn.execute(f"SELECT 1 FROM {t} WHERE date < ? LIMIT 1", (cur + "-01",)).fetchone()
-                       for t in ("income", "transactions", "business", "business_payouts"))
+                       for t in ("income", "income_entries", "transactions", "business", "business_payouts"))
         return prev if has_prev else end
     return end
 
@@ -89,7 +89,9 @@ def _blank() -> dict:
 def monthly_data(conn: sqlite3.Connection) -> dict[str, dict]:
     """month -> {income: {type: amt}, needs, wants, savings_bucket} for months with income/spend."""
     out: dict[str, dict] = defaultdict(_blank)
-    for r in conn.execute("SELECT substr(date,1,7) m, type, SUM(amount) s FROM income GROUP BY m, type"):
+    for r in conn.execute("SELECT substr(date,1,7) m, type, SUM(amount) s FROM "
+                          "(SELECT date, type, amount FROM income UNION ALL SELECT date, type, amount FROM income_entries) "
+                          "GROUP BY m, type"):
         out[r["m"]]["income"][r["type"] if r["type"] in INCOME_TYPES else "other"] += r["s"]
     for r in conn.execute("SELECT substr(date,1,7) m, bucket, SUM(amount) s FROM transactions GROUP BY m, bucket"):
         if r["bucket"] in ("needs", "wants"):
@@ -362,12 +364,56 @@ def last_import(conn: sqlite3.Connection) -> dict | None:
 
 def summary(conn: sqlite3.Connection, today: date | None = None) -> dict:
     today = today or date.today()
-    v = monthly_data(conn).get(default_month(conn, today), _blank())
+    data, month = monthly_data(conn), default_month(conn, today)
+    v = data.get(month, _blank())
     inc, spend = _income(v), v["needs"] + v["wants"]
+    cur = data.get(month_of(today), _blank())  # in-progress month, so newly added income shows right away
     fi, invested = fi_number(conn, today), invested_total(conn)
     return {"net_worth": r2(net_worth_now(conn)), "net_worth_change_30d": r2(net_worth_change_30d(conn)),
-            "monthly_income": r2(inc), "monthly_spend": r2(spend),
+            "monthly_income": r2(inc), "monthly_spend": r2(spend), "income_month": month,
+            "month_to_date_income": r2(_income(cur)),
             "savings_rate": round((inc - spend) / inc, 4) if inc else 0.0,
             "emergency_months": r2(emergency_months(conn, today)), "fi_number": r2(fi),
             "fi_progress": round(invested / fi, 4) if fi else 0.0, "invested": r2(invested),
             "business_profit_ytd": business_profit_ytd(conn, today), "last_import": last_import(conn)}
+
+
+# ---------------------------------------------------------------- income entered in the app
+ENTRY_COLS = "id, date, source, type, amount, note, created_at"
+
+
+def list_income_entries(conn: sqlite3.Connection, limit: int = 100) -> list[dict]:
+    return [dict(r) for r in conn.execute(
+        f"SELECT {ENTRY_COLS} FROM income_entries ORDER BY date DESC, id DESC LIMIT ?", (limit,))]
+
+
+def get_income_entry(conn: sqlite3.Connection, eid: int) -> dict | None:
+    r = conn.execute(f"SELECT {ENTRY_COLS} FROM income_entries WHERE id=?", (eid,)).fetchone()
+    return dict(r) if r else None
+
+
+def create_income_entry(conn: sqlite3.Connection, d: str, source: str, typ: str, amount: float, note: str) -> dict:
+    cur = conn.execute("INSERT INTO income_entries (date, source, type, amount, note, created_at) VALUES (?,?,?,?,?,?)",
+                       (d, source, typ, amount, note, datetime.now(timezone.utc).isoformat(timespec="seconds")))
+    return get_income_entry(conn, cur.lastrowid)
+
+
+def update_income_entry(conn: sqlite3.Connection, eid: int, fields: dict) -> dict | None:
+    if not get_income_entry(conn, eid):
+        return None
+    if fields:
+        sets = ", ".join(f"{k}=?" for k in fields)
+        conn.execute(f"UPDATE income_entries SET {sets} WHERE id=?", (*fields.values(), eid))
+    return get_income_entry(conn, eid)
+
+
+def delete_income_entry(conn: sqlite3.Connection, eid: int) -> bool:
+    return conn.execute("DELETE FROM income_entries WHERE id=?", (eid,)).rowcount > 0
+
+
+def income_sources(conn: sqlite3.Connection, limit: int = 20) -> list[str]:
+    """Distinct non-empty sources from workbook income and app entries, most recent first."""
+    q = ("SELECT source, MAX(date) d FROM (SELECT source, date FROM income UNION ALL "
+         "SELECT source, date FROM income_entries) WHERE TRIM(source) <> '' GROUP BY source "
+         "ORDER BY d DESC, source LIMIT ?")
+    return [r["source"] for r in conn.execute(q, (limit,))]

@@ -98,6 +98,7 @@ function chartCard(title, build, { tall = false, note } = {}) {
 }
 const moneyTick = { callback: (v) => (Math.abs(v) >= 1000 ? '$' + v / 1000 + 'k' : '$' + v) };
 const moneyTooltip = { callbacks: { label: (c) => `${c.dataset.label}: ${usd.format(c.parsed.y ?? c.parsed.x)}` } };
+const localMonth = () => { const d = new Date(); return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`; };
 const monthLabel = (m) => { const [y, mo] = String(m).split('-'); return mo ? new Date(+y, +mo - 1, 1).toLocaleString('en-US', { month: 'short', year: '2-digit' }) : m; };
 const TYPE_ORDER = ['paycheck', 'dividend', 'interest', 'business', 'other'];
 
@@ -113,10 +114,14 @@ const dlg = $('#dlg'), dlgForm = $('#dlg-form');
 function fieldEl(f, val) {
   let input;
   const id = 'f_' + f.key;
-  if (f.type === 'select') input = h('select', { id, name: f.key }, f.options.map((o) => h('option', { value: o, selected: o === val }, o)));
+  if (f.type === 'select') input = h('select', { id, name: f.key }, f.options.map((o) => { const ov = o.value ?? o; return h('option', { value: ov, selected: ov === val }, o.label ?? o); }));
   else if (f.type === 'textarea') input = h('textarea', { id, name: f.key, rows: 3 }, val ?? '');
   else if (f.type === 'checkbox') return h('label', { for: id }, h('input', { id, name: f.key, type: 'checkbox', checked: !!val }), f.label);
-  else input = h('input', { id, name: f.key, type: f.type || 'text', value: val ?? '', step: f.type === 'number' ? 'any' : null, required: f.required, readonly: f.readonly });
+  else {
+    const listId = f.datalist ? 'dl_' + f.key : null;
+    input = h('input', { id, name: f.key, type: f.type || 'text', value: val ?? '', step: f.type === 'number' ? 'any' : null, required: f.required, readonly: f.readonly, inputmode: f.inputmode, placeholder: f.placeholder, list: listId, autocomplete: f.datalist ? 'off' : null, maxlength: f.maxlength });
+    if (listId) return h('label', { for: id }, f.label + (f.required ? ' *' : ''), input, h('datalist', { id: listId }, f.datalist.map((o) => h('option', { value: o }))), h('span', { class: 'field-error', id: 'err_' + f.key }));
+  }
   return h('label', { for: id }, f.label + (f.required ? ' *' : ''), input, h('span', { class: 'field-error', id: 'err_' + f.key }));
 }
 
@@ -167,17 +172,67 @@ async function refreshHeader() {
   } catch { $('#last-import').textContent = 'No import yet'; return null; }
 }
 
+// ---------- income entered in the app ----------
+const INCOME_TYPE_OPTS = [['paycheck', 'Paycheck'], ['dividend', 'Dividend'], ['interest', 'Interest'], ['business', 'Business'], ['other', 'Other']].map(([value, label]) => ({ value, label }));
+const typeLabel = (t) => INCOME_TYPE_OPTS.find((o) => o.value === t)?.label || t;
+const todayISO = () => { const d = new Date(); return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`; };
+const parseMoney = (v) => { const n = Number(String(v ?? '').replace(/[$,\s]/g, '')); return Number.isFinite(n) ? n : NaN; };
+
+/** Add (entry == null) or edit an app-entered income row, then re-render the current view. */
+async function openIncomeForm(entry) {
+  const src = entry ? null : await api('/finance/income-sources').catch(() => null);
+  const fields = [
+    { key: 'amount', label: 'Amount', required: true, inputmode: 'decimal', placeholder: '$0.00' },
+    { key: 'source', label: 'Source', required: true, placeholder: 'e.g. Paycheck, Dividends, Freelance', datalist: src?.sources || [], maxlength: 80 },
+    { key: 'type', label: 'Type', type: 'select', options: INCOME_TYPE_OPTS },
+    { key: 'date', label: 'Date', type: 'date', required: true },
+    { key: 'note', label: 'Note' },
+  ];
+  openForm({
+    title: entry ? 'Edit income' : 'Add income', fields,
+    values: entry ? { ...entry, amount: String(entry.amount) } : { type: 'paycheck', date: todayISO() },
+    onSave: async (v) => {
+      const amount = parseMoney(v.amount);
+      if (!(amount > 0)) { const e = new ApiError('amount: enter an amount greater than 0', 422); e.errors = [{ field: 'amount', msg: 'Enter an amount greater than 0' }]; throw e; }
+      const body = { ...v, amount, note: v.note || '', date: v.date || todayISO() };
+      if (entry) await api('/finance/income-entries/' + entry.id, { method: 'PUT', body });
+      else await api('/finance/income-entries', { method: 'POST', body });
+      toast(entry ? 'Income updated' : 'Income added');
+      refreshHeader(); render();
+    },
+  });
+}
+const addIncomeButton = () => h('button', { type: 'button', class: 'primary add-income', onclick: () => openIncomeForm() }, 'Add income');
+
+async function incomeEntriesCard() {
+  const data = await get('/finance/income-entries?limit=200');
+  const list = data?.entries || [];
+  const card = h('section', { class: 'card' }, h('div', { class: 'row between' }, h('h2', null, 'Income you added'), addIncomeButton()));
+  card.append(h('p', { class: 'muted small' }, "Don't enter the same income in both the workbook and here, or it will be counted twice."));
+  if (!list.length) { card.append(h('div', { class: 'empty' }, 'Income you add with the button shows up here. Workbook income is imported separately.')); return card; }
+  card.append(h('div', { class: 'table-wrap' }, h('table', null,
+    h('thead', null, h('tr', null, ['Date', 'Source', 'Type', 'Amount', 'Note', ''].map((c, i) => h('th', { class: i === 3 ? 'num' : null }, c)))),
+    h('tbody', null, list.map((e) => h('tr', null,
+      h('td', null, e.date), h('td', null, e.source), h('td', null, typeLabel(e.type)), h('td', { class: 'num' }, money(e.amount, true)), h('td', { class: 'wrap' }, e.note),
+      h('td', { class: 'actions' },
+        h('button', { class: 'small', onclick: () => openIncomeForm(e) }, 'Edit'),
+        h('button', { class: 'small danger', onclick: async () => { if (!confirmDelete(`income "${e.source}" (${money(e.amount, true)})`)) return; try { await api('/finance/income-entries/' + e.id, { method: 'DELETE' }); toast('Income deleted'); render(); } catch (x) { toast(x.message, 'error'); } } }, 'Delete'))))))));
+  return card;
+}
+
 // ---------- views ----------
 async function viewOverview() {
   const [s, nw, inc, car] = await Promise.all([get('/finance/summary'), get('/finance/net-worth?months=36'), get('/finance/income?months=12'), get('/career/summary')]);
   const frag = h('div');
+  frag.append(h('div', { class: 'row', style: 'margin-bottom:12px' }, addIncomeButton()));
   const hasFinance = s && s.last_import;
-  if (!hasFinance) frag.append(h('div', { class: 'banner' }, 'Upload your budget workbook in Settings to see your finance numbers.'));
+  if (!hasFinance && !s?.monthly_income) frag.append(h('div', { class: 'banner' }, 'Upload your budget workbook in Settings to see your finance numbers.'));
   const chg = s?.net_worth_change_30d;
   const fiPct = s?.fi_progress;
   frag.append(h('div', { class: 'grid tiles' },
     tile('Net worth', money(s?.net_worth), chg != null ? signed(chg) + ' in 30 days' : null),
-    tile('Monthly income', money(s?.monthly_income)),
+    tile('Monthly income' + (s?.income_month ? ' (' + monthLabel(s.income_month) + ')' : ''), money(s?.monthly_income),
+      s && s.income_month !== localMonth() ? 'This month so far: ' + money(s.month_to_date_income) : null),
     tile('Savings rate', pct(s?.savings_rate), s?.monthly_spend != null ? 'Spend ' + money(s.monthly_spend) + '/mo' : null),
     tile('Emergency fund', s?.emergency_months != null ? num(s.emergency_months) + ' mo' : '–'),
     tile('FI progress', pct(fiPct), s?.fi_number ? 'of ' + money(s.fi_number) : null),
@@ -215,11 +270,13 @@ function incomeStack(inc) {
 let ruleMonth = '';
 async function viewMoney() {
   const q = ruleMonth ? '?month=' + encodeURIComponent(ruleMonth) : '';
-  const [inc, cash, rule, nw, biz] = await Promise.all([get('/finance/income?months=12'), get('/finance/cashflow?months=12'), get('/finance/budget-rule' + q), get('/finance/net-worth?months=36'), get('/finance/business?months=12')]);
+  const [inc, cash, rule, nw, biz, entries] = await Promise.all([get('/finance/income?months=12'), get('/finance/cashflow?months=12'), get('/finance/budget-rule' + q), get('/finance/net-worth?months=36'), get('/finance/business?months=12'), incomeEntriesCard()]);
   const frag = h('div');
+  frag.append(h('div', { class: 'row', style: 'margin-bottom:12px' }, addIncomeButton()));
   if (!(inc?.months?.length || cash?.points?.length)) frag.append(h('div', { class: 'banner' }, 'Upload your budget workbook in Settings to see this.'));
   frag.append(h('div', { class: 'grid cols-2' }, incomeStack(inc), cashflowChart(cash)));
   frag.append(budgetRulePanel(rule));
+  frag.append(entries);
   frag.append(h('div', { class: 'grid cols-2' }, assetsChart(nw), businessChart(biz)));
   return frag;
 }
@@ -665,6 +722,7 @@ async function render() {
 }
 window.addEventListener('hashchange', () => { window.scrollTo(0, 0); render(); view.focus({ preventScroll: true }); });
 window.matchMedia('(prefers-color-scheme: dark)').addEventListener('change', () => render());
+$('#add-income').addEventListener('click', () => openIncomeForm());
 $('#signout').addEventListener('click', async () => {
   try { await fetch('/api/auth/logout', { method: 'POST', headers: { 'X-Dash': '1' } }); } catch { /* ignore */ }
   location.replace('/login.html');

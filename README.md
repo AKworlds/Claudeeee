@@ -73,6 +73,10 @@ The **Taxes** tab (second tab) tracks your side-business payouts and tells you h
 
 Each import replaces all finance rows with the workbook contents; the workbook is the source of truth.
 
+### Adding income from the app
+
+Tap **Add income** (Overview and Money) or **+ Income** in the header (any tab, handy on a phone) to record take-home pay, dividends or other income: amount, source, type, date and an optional note. These entries are stored separately from the workbook, are never touched by imports, and count in every chart and number just like workbook income. Review, edit or delete them under **Income you added** on the Money tab. Don't enter the same income in both the workbook and the app, or it will be counted twice.
+
 ### Default workbook layout
 
 Out of the box the importer expects these sheets (header row may sit anywhere in the first 10 rows; extra columns are ignored):

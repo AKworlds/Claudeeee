@@ -1,5 +1,5 @@
 // Service worker: app-shell cache, network-first. Never touches /api/*.
-const CACHE = 'dash-shell-v1';
+const CACHE = 'dash-shell-v2';
 const SHELL = ['/', '/index.html', '/login.html', '/styles.css', '/app.js', '/login.js', '/vendor/chart.umd.min.js',
   '/manifest.webmanifest', '/icons/icon-192.png', '/icons/icon-512.png', '/icons/apple-touch-icon.png'];
 

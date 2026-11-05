@@ -150,3 +150,15 @@ main { padding-bottom: max(16px, env(safe-area-inset-bottom)); }
   .form-grid { grid-template-columns: 1fr; }
   td.actions { white-space: nowrap; }
 }
+
+/* ---------- add income ---------- */
+.top-actions { flex-wrap: nowrap; min-width: 0; }
+.top-actions button { white-space: nowrap; flex: 0 0 auto; }
+@media (max-width: 640px) {
+  dialog input, dialog select, dialog textarea { font-size: 16px; }
+  .dlg-actions { flex-direction: column-reverse; }
+  .dlg-actions button { width: 100%; }
+  button.add-income { width: 100%; }
+  .top-row > h1 { flex: 0 0 auto; }
+  .top-actions { margin-left: auto; }
+}

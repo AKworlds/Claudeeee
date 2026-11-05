@@ -72,6 +72,9 @@ Finance (Agent A):
 - `GET  /api/finance/summary` → `{net_worth, net_worth_change_30d, monthly_income, monthly_spend, savings_rate,
    emergency_months, fi_number, fi_progress, invested, business_profit_ytd, last_import}`
 - `GET  /api/finance/income?months=12` → `{months:[YYYY-MM], series:{paycheck:[..], dividend:[..], ...}, total:[..]}`
+- `GET  /api/finance/income-entries?limit=100` → `{entries:[{id, date, source, type, amount, note, created_at}]}` newest first (app-entered income, table `income_entries`, counted with workbook income, survives imports)
+- `POST /api/finance/income-entries` body `{date?(default today), source(<=80), type(paycheck|dividend|interest|business|other), amount(>0,<=10M), note?}` → 201 entry; `PUT /api/finance/income-entries/{id}` partial; `DELETE` (404 if missing)
+- `GET  /api/finance/income-sources` → `{sources:[..]}` distinct sources from both income tables, most recent first, max 20
 - `GET  /api/finance/net-worth?months=36` → `{points:[{month, assets, liabilities, net_worth}]}`
 - `GET  /api/finance/cashflow?months=12` → `{points:[{month, income, needs, wants, savings, savings_rate}]}`
 - `GET  /api/finance/budget-rule?month=YYYY-MM` → `{month, net_income, buckets:[{bucket, actual, actual_pct, target_pct, delta_pct}]}`
