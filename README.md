@@ -56,10 +56,11 @@ The dashboard is an installable web app (PWA). It must be opened over HTTPS (you
 The **Taxes** tab (second tab) tracks your side-business payouts and tells you how much to set aside for taxes.
 
 - **Log payout**: enter what you received (and optional expenses). You get "Set aside $X": the extra federal income tax, self-employment (SE) tax and state tax that payout adds, using your year-to-date business profit so the amount reflects what you have earned so far. Move that money to savings and tap "I moved it to savings".
+- **Three components**: every set-aside is split into (1) *Self-employment tax (FICA)*: Social Security 12.4% + Medicare 2.9% on 92.35% of profit, (2) *Federal income tax* using the 2026 progressive brackets for your filing status, and (3) *State income tax* at your state rate. Self-employment tax is how self-employed people pay FICA, both halves, so there is no separate FICA charge on top of it. The "Where your set-aside goes" card shows year totals and each component's share of profit; each payout shows its own split. Components are rounded to cents while the set-aside is rounded up to whole dollars, so they may sum to a few cents less.
 - **Tiles**: profit so far this year, total set aside, total you've actually saved, shortfall (set aside minus saved, highlighted when positive) and your effective rate on business profit.
 - **Settings**:
-  - *Federal tax bracket* (10% to 37%): pick the bracket your total taxable income falls in. If you are unsure, 22% is a safe default for most people. It is applied to business profit after the SE-tax deduction and the QBI deduction.
-  - *State income tax rate*: Texas is 0.
+  - *Filing status* (Single, Married filing jointly, Head of household): selects the 2026 federal bracket table. Federal income tax is computed on your side-business profit only (after the half-SE and QBI deductions; standard deduction not applied), so early dollars are taxed at 10% and later ones at higher rates as profit grows.
+  - *State income tax rate*: 0% if your state has no income tax (AK, FL, NV, NH, SD, TN, TX, WA, WY); otherwise your state's top marginal rate as an estimate.
   - *Buffer %*: optional extra cushion added to every set-aside.
 - **Quarterly estimated payments** (federal, Form 1040-ES) are normally due about **April 15, June 15, September 15 and January 15** of the following year. Each quarter shows the sum of set-asides for payouts in that period, what you have paid, and a status. Pay at irs.gov/payments (Direct Pay), then use **Mark paid** to record it.
 - If your total yearly tax from the side business is under $1,000, estimated payments are generally not required.

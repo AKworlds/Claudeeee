@@ -123,30 +123,36 @@ Business profit for tax = payouts (amount - expenses) + workbook `business` rows
 for the tax year. The Side Business chart (`/api/finance/business`) also includes payouts.
 
 Settings (settings key `tax_settings`, merged over defaults; unknown/legacy keys such as w2_income and
-filing_status are dropped on read and save):
-`{federal_bracket: 0.22 (one of 0.10, 0.12, 0.22, 0.24, 0.32, 0.35, 0.37), state_rate: 0.0 (fraction;
+federal_bracket are dropped on read and save):
+`{filing_status: "single" (single|married_joint|head_of_household), state_rate: 0.0 (fraction;
 Texas = 0), buffer_pct: 0 (extra % added to each set-aside), use_qbi: true}`. Other income has tax
 already withheld and is never tracked; only business income is modelled. SE/QBI figures live in
-config `tax:` (yearly update).
+config `tax:` (yearly update), including `tax.brackets` (2026 progressive brackets per filing status,
+`[[upper_bound|null, rate], ...]`).
 
 Math for year Y and cumulative business profit P (P >= 0; losses => 0 tax):
+- SE tax IS the self-employed FICA (Social Security + Medicare, both halves): never add FICA on top.
+  social_security = se_ss_rate * P * se_net_factor; medicare = se_medicare_rate * P * se_net_factor; SE = their sum.
+- Per payout `breakdown {social_security, medicare, federal, state, federal_rate}` (federal_rate = bracket of the payout's top dollar) = incremental component tax x buffer, rounded to cents
+  (may sum to a few cents less than set_aside, which is the whole-dollar ceil of the total).
 - SE = (se_ss_rate + se_medicare_rate) * P * se_net_factor. No Social Security wage-base cap and no additional
   Medicare tax (noted in the UI). If net SE earnings < 400 at year end the IRS charges no SE tax; keep accruing, add a note.
 - QBI = qbi_rate * max(0, P - SE/2) if use_qbi.
-- Federal = federal_bracket * max(0, P - SE/2 - QBI). State = state_rate * P. Total(P) = SE + Federal + State.
+- Federal = bracket_tax(max(0, P - SE/2 - QBI), brackets[filing_status]), progressive, on business income alone; standard deduction not applied. State = state_rate * P. Total(P) = SE + Federal + State.
 - Per payout (chronological within the year): set_aside_i = ceil((Total(P_i) - Total(P_{i-1})) * (1 + buffer_pct/100)).
 - marginal_rate = exact (unrounded) buffered tax on the next $100 / 100. effective_rate = Total(P)/P.
 - Quarters from config `tax.quarters`: amount = sum of set_asides for payouts dated in the period;
   paid = sum of tax_payments whose `period` equals the quarter label (e.g. "2026-Q3"); status past_due|due_soon (<=30 days)|upcoming|paid.
 - Notes: estimate only / not tax advice; < $1,000 total year tax => estimated payments generally not required;
-  bracket should be the one your total income falls in; state not included when state_rate = 0.
+  federal uses 2026 brackets on side-business profit only (standard deduction not applied); state not included when state_rate = 0.
 
 API (prefix /api/tax), all JSON:
-- `GET/PUT /settings` → settings object (PUT validates: federal_bracket in the allowed set, state 0..0.15, buffer 0..50; else 422).
-- `GET /payouts?year=` → `{payouts:[{id,date,amount,expenses,profit,set_aside,saved,note}]}` newest first.
-- `POST /payouts` `{date?=today, amount>0, expenses>=0=0, note?, saved?}` → the payout incl. computed `set_aside`
+- `GET/PUT /settings` → settings object (PUT validates: filing_status in the enum, state 0..0.15, buffer 0..50; else 422).
+- `GET /payouts?year=` → `{payouts:[{id,date,amount,expenses,profit,set_aside,breakdown,saved,note}]}` newest first.
+- `POST /payouts` `{date?=today, amount>0, expenses>=0=0, note?, saved?}` → the payout incl. computed `set_aside`, `breakdown`
   and `{rate}` (= set_aside/profit). `PUT /payouts/{id}` partial (e.g. `{saved: 412}`), `DELETE /payouts/{id}`.
-- `GET /summary?year=` → `{year, profit_ytd, tax:{se, federal, state, total}, effective_rate,
+- `GET /summary?year=` → `{year, profit_ytd, tax:{se, social_security, medicare, federal, state, total},
+  rates:{social_security, medicare, se, federal_marginal, federal_effective, state_rate} (effective rates on profit), effective_rate,
   marginal_rate, set_aside_total, saved_total, shortfall, quarters:[{label, start, end, due, amount, paid, status}],
   projection:{annual_profit, annual_tax} (YTD profit annualized by months elapsed), notes:[str]}`.
 - `GET/POST /payments`, `DELETE /payments/{id}`; POST `{date?, amount>0, period, note?}`.

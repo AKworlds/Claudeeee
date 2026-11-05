@@ -162,3 +162,13 @@ main { padding-bottom: max(16px, env(safe-area-inset-bottom)); }
   .top-row > h1 { flex: 0 0 auto; }
   .top-actions { margin-left: auto; }
 }
+
+/* ---------- tax breakdown ---------- */
+.brk { text-align: left; margin: .6rem 0; }
+.brk-row { display: grid; grid-template-columns: 1fr auto 3.2rem; gap: .1rem .6rem; padding: .35rem 0; border-bottom: 1px solid var(--border); font-variant-numeric: tabular-nums; }
+.brk-row .amt { text-align: right; font-weight: 600; }
+.brk-row .share { text-align: right; color: var(--muted); font-size: .85rem; }
+.brk-row:not(:has(.share)) { grid-template-columns: 1fr auto; }
+.brk-sub { grid-column: 1 / -1; color: var(--muted); font-size: .8rem; }
+.brk-row.total { font-weight: 700; border-bottom: 0; }
+.brk-line { white-space: nowrap; font-size: .75rem; }

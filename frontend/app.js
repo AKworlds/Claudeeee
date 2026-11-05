@@ -572,12 +572,27 @@ async function viewSettings() {
 // ---------- taxes ----------
 const todayStr = () => { const d = new Date(); return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`; };
 const QSTATUS = { paid: ['good', 'Paid'], past_due: ['bad', 'Past due'], due_soon: ['warn', 'Due soon'], upcoming: ['', 'Upcoming'], nothing_due: ['', 'Nothing due'] };
-const BRACKETS = [0.10, 0.12, 0.22, 0.24, 0.32, 0.35, 0.37];
+const FILING = [['single', 'Single'], ['married_joint', 'Married filing jointly'], ['head_of_household', 'Head of household']];
 
 function bigInput(id, label, attrs = {}) {
   return h('label', { for: id }, label, h('input', Object.assign({ id, name: id }, attrs)));
 }
 const numOrNull = (v) => (String(v).trim() === '' || isNaN(Number(v)) ? null : Number(v));
+
+// Tax breakdown rows: SE tax (= self-employed FICA: Social Security + Medicare), federal, state.
+function taxBreakdownRows(b, rates, profit) {
+  const bracket = b.federal_rate != null ? ` (${Math.round(b.federal_rate * 100)}% bracket)`
+    : (rates?.federal_marginal != null ? ` (marginal ${pct(rates.federal_marginal)}, effective ${pct(rates.federal_effective || 0)})` : '');
+  const none = !(rates?.state_rate > 0);
+  const share = (v) => (profit > 0 ? h('span', { class: 'share' }, pct(v / profit)) : null);
+  const se = (b.social_security || 0) + (b.medicare || 0);
+  return [
+    h('div', { class: 'brk-row' }, h('span', null, 'Self-employment tax (FICA)'), h('span', { class: 'amt' }, money(se, true)), share(se),
+      h('div', { class: 'brk-sub' }, `Social Security ${money(b.social_security, true)} \u00b7 Medicare ${money(b.medicare, true)}`)),
+    h('div', { class: 'brk-row' }, h('span', null, 'Federal income tax' + bracket), h('span', { class: 'amt' }, money(b.federal, true)), share(b.federal)),
+    h('div', { class: 'brk-row' }, h('span', null, 'State income tax'), h('span', { class: 'amt' }, money(b.state, true) + (none && !b.state ? ' \u2014 none set' : '')), share(b.state)),
+  ];
+}
 
 async function viewTax() {
   const [sum, pay, set] = await Promise.all([get('/tax/summary'), get('/tax/payouts'), get('/tax/settings')]);
@@ -593,9 +608,21 @@ async function viewTax() {
       tile('Shortfall', money(short), short > 0 ? 'Move this to savings' : 'On track', short > 0 ? 'bad' : 'good'),
       tile('Effective rate', pct(sm.effective_rate), sm.marginal_rate != null ? 'Next $100: ' + pct(sm.marginal_rate) : null));
   };
-  let tilesEl = makeTiles(sum);  // refreshed in place after logging a payout
+  const makeBreakdownCard = (sm) => {
+    if (!sm?.tax) return h('div', { hidden: true });
+    const t = sm.tax;
+    return h('section', { class: 'card' }, h('h2', null, 'Where your set-aside goes'),
+      h('p', { class: 'muted small' }, 'Self-employment tax is how self-employed people pay FICA (Social Security + Medicare) \u2014 both halves of the tax.'),
+      h('div', { class: 'brk' }, taxBreakdownRows(t, sm.rates, sm.profit_ytd),
+        h('div', { class: 'brk-row total' }, h('span', null, 'Total estimated tax'), h('span', { class: 'amt' }, money(t.total, true)),
+          sm.profit_ytd > 0 ? h('span', { class: 'share' }, pct(t.total / sm.profit_ytd)) : null)));
+  };
+  let tilesEl = makeTiles(sum), brkEl = makeBreakdownCard(sum);  // refreshed in place after logging a payout
   const refreshTiles = async () => {
-    try { const fresh = makeTiles(await get('/tax/summary')); tilesEl.replaceWith(fresh); tilesEl = fresh; } catch { /* keep old tiles */ }
+    try {
+      const fs = await get('/tax/summary'), ft = makeTiles(fs), fb = makeBreakdownCard(fs);
+      tilesEl.replaceWith(ft); tilesEl = ft; brkEl.replaceWith(fb); brkEl = fb;
+    } catch { /* keep old tiles */ }
   };
 
   // (a) log payout
@@ -626,7 +653,8 @@ async function viewTax() {
         catch (x) { e.target.disabled = false; toast(x.message, 'error'); }
       } }, 'I moved it to savings');
       result.replaceChildren(h('div', { class: 'label' }, 'Taxes on this payout'), h('div', { class: 'big-num' }, 'Set aside ' + money(p.set_aside)),
-        h('div', { class: 'muted' }, rate != null ? `${pct(rate)} of ${money(p.profit ?? amount - (expenses || 0), true)} profit` : ''), moved,
+        h('div', { class: 'muted' }, rate != null ? `${pct(rate)} of ${money(p.profit ?? amount - (expenses || 0), true)} profit` : ''),
+        p.breakdown && h('div', { class: 'brk' }, taxBreakdownRows(p.breakdown, sum?.rates)), moved,
         h('button', { type: 'button', onclick: reload }, 'Done'));
       result.hidden = false;
       form.hidden = true;
@@ -641,6 +669,9 @@ async function viewTax() {
 
   // (b) tiles
   frag.append(tilesEl);
+
+  // (b2) where the set-aside goes
+  frag.append(brkEl);
 
   // (c) quarters
   const qCard = h('section', { class: 'card' }, h('h2', null, 'Quarterly estimated payments'));
@@ -666,7 +697,8 @@ async function viewTax() {
   else pCard.append(h('div', { class: 'table-wrap' }, h('table', null,
     h('thead', null, h('tr', null, ['Date', 'Amount', 'Expenses', 'Set aside', 'Saved', ''].map((t, i) => h('th', { class: i > 0 && i < 5 ? 'num' : '' }, t)))),
     h('tbody', null, list.map((p) => h('tr', null,
-      h('td', null, p.date), h('td', { class: 'num' }, money(p.amount, true)), h('td', { class: 'num' }, money(p.expenses, true)), h('td', { class: 'num' }, money(p.set_aside)),
+      h('td', null, p.date), h('td', { class: 'num' }, money(p.amount, true)), h('td', { class: 'num' }, money(p.expenses, true)), h('td', { class: 'num' }, money(p.set_aside), p.breakdown && h('div', { class: 'small muted brk-line' },
+        `SE ${money(p.breakdown.social_security + p.breakdown.medicare)} \u00b7 Fed ${money(p.breakdown.federal)} \u00b7 State ${money(p.breakdown.state)}`)),
       h('td', { class: 'num' }, (p.saved || 0) >= (p.set_aside || 0) && p.set_aside > 0 ? h('span', { class: 'badge good' }, money(p.saved)) : money(p.saved)),
       h('td', { class: 'actions' },
         (p.saved || 0) < (p.set_aside || 0) && h('button', { class: 'small', onclick: async () => { try { await api('/tax/payouts/' + p.id, { method: 'PUT', body: { saved: p.set_aside } }); reload(); } catch (e) { toast(e.message, 'error'); } } }, 'Mark saved'),
@@ -680,14 +712,16 @@ async function viewTax() {
   const serr = h('div', { class: 'errors', hidden: true, role: 'alert' });
   const sform = h('form', { novalidate: true }, serr,
     h('div', { class: 'form-grid' },
-      h('label', { for: 'federal_bracket' }, 'Federal tax bracket', h('select', { id: 'federal_bracket', name: 'federal_bracket' }, BRACKETS.map((v) => h('option', { value: String(v), selected: Math.abs(v - (s.federal_bracket ?? 0.22)) < 1e-9 }, Math.round(v * 100) + '%')))),
-      bigInput('state_rate', 'State income tax rate (%)', { type: 'text', inputmode: 'decimal', value: s.state_rate != null ? +(s.state_rate * 100).toFixed(3) : 0 }),
+      h('div', null, h('label', { for: 'filing_status' }, 'Filing status', h('select', { id: 'filing_status', name: 'filing_status' }, FILING.map(([v, t]) => h('option', { value: v, selected: v === (s.filing_status || 'single') }, t)))),
+        h('div', { class: 'muted small' }, 'Federal income tax uses the 2026 brackets on your side-business profit only (after the half-SE and QBI deductions; standard deduction not applied).')),
+      h('div', null, bigInput('state_rate', 'State income tax rate (%)', { type: 'text', inputmode: 'decimal', value: s.state_rate != null ? +(s.state_rate * 100).toFixed(3) : 0 }),
+        h('div', { class: 'muted small' }, '0% if your state has no income tax (AK, FL, NV, NH, SD, TN, TX, WA, WY). Otherwise use your state\u2019s top marginal rate as an estimate.')),
       bigInput('buffer_pct', 'Extra buffer (%)', { type: 'text', inputmode: 'decimal', value: s.buffer_pct ?? 0 })),
     h('button', { type: 'submit', class: 'primary' }, 'Save settings'));
   sform.addEventListener('submit', async (ev) => {
     ev.preventDefault();
     serr.hidden = true;
-    const body = Object.assign({}, s, { federal_bracket: Number(sform.federal_bracket.value), state_rate: (numOrNull(sform.state_rate.value) ?? 0) / 100, buffer_pct: numOrNull(sform.buffer_pct.value) ?? 0 });
+    const body = Object.assign({}, s, { filing_status: sform.filing_status.value, state_rate: (numOrNull(sform.state_rate.value) ?? 0) / 100, buffer_pct: numOrNull(sform.buffer_pct.value) ?? 0 });
     try { await api('/tax/settings', { method: 'PUT', body }); toast('Settings saved'); reload(); }
     catch (e) { serr.hidden = false; serr.textContent = e.message; }
   });

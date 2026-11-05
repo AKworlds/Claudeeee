@@ -2,7 +2,7 @@
 from __future__ import annotations
 
 from datetime import date, datetime, timezone
-from typing import Optional
+from typing import Literal, Optional
 
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel, Field, field_validator
@@ -24,17 +24,10 @@ def _iso(v):
 
 
 class SettingsIn(BaseModel):
-    federal_bracket: Optional[float] = None
+    filing_status: Optional[Literal["single", "married_joint", "head_of_household"]] = None
     state_rate: Optional[float] = Field(None, ge=0, le=0.15)
     buffer_pct: Optional[float] = Field(None, ge=0, le=50)
     use_qbi: Optional[bool] = None
-
-    @field_validator("federal_bracket")
-    @classmethod
-    def _bracket(cls, v):
-        if v is not None and not any(abs(v - b) < 1e-9 for b in svc.FEDERAL_BRACKETS):
-            raise ValueError("must be one of 0.10, 0.12, 0.22, 0.24, 0.32, 0.35, 0.37")
-        return v and round(v, 2)
 
 
 class PayoutIn(BaseModel):

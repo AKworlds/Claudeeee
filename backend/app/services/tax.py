@@ -15,9 +15,9 @@ from ..config import get_settings
 
 SETTINGS_KEY = "tax_settings"
 DEFAULT_SETTINGS: dict[str, Any] = {
-    "federal_bracket": 0.22, "state_rate": 0.0, "buffer_pct": 0.0, "use_qbi": True,
+    "filing_status": "single", "state_rate": 0.0, "buffer_pct": 0.0, "use_qbi": True,
 }
-FEDERAL_BRACKETS = (0.10, 0.12, 0.22, 0.24, 0.32, 0.35, 0.37)
+FILING_STATUSES = ("single", "married_joint", "head_of_household")
 
 
 def r2(x: float) -> float:
@@ -43,20 +43,63 @@ def save_settings_tax(conn: sqlite3.Connection, data: dict) -> dict:
 
 
 # ---------------------------------------------------------------- math
+def _table(settings: dict, tbl: dict) -> list:
+    fs = settings.get("filing_status")
+    return tbl["brackets"][fs if fs in FILING_STATUSES else DEFAULT_SETTINGS["filing_status"]]
+
+
+def bracket_tax(income: float, brackets: list) -> float:
+    """Progressive tax on `income` using [[upper_bound|None, rate], ...]."""
+    tax_, lo = 0.0, 0.0
+    for hi, rate in brackets:
+        if income <= lo:
+            break
+        top = income if hi is None else min(income, hi)
+        tax_ += (top - lo) * rate
+        if hi is None:
+            break
+        lo = hi
+    return tax_
+
+
+def bracket_rate(income: float, brackets: list) -> float:
+    """Rate of the bracket that income's top dollar falls in (first bracket at 0)."""
+    for hi, rate in brackets:
+        if hi is None or income <= hi:
+            return rate
+    return brackets[-1][1]
+
+
+def _fed_base(P: float, se: float, settings: dict, tbl: dict) -> float:
+    P = max(0.0, P)
+    qbi = tbl["qbi_rate"] * max(0.0, P - se / 2) if settings.get("use_qbi", True) else 0.0
+    return max(0.0, P - se / 2 - qbi)
+
+
+def federal_rate_at(P: float, settings: dict, tbl: dict | None = None) -> float:
+    """Federal bracket rate for cumulative profit P."""
+    tbl = tbl or tables()
+    se = (tbl["se_ss_rate"] + tbl["se_medicare_rate"]) * max(0.0, P) * tbl["se_net_factor"]
+    return bracket_rate(_fed_base(P, se, settings, tbl), _table(settings, tbl))
+
+
 def total_tax(P: float, settings: dict, tbl: dict | None = None) -> dict:
     """Tax owed on cumulative business profit P for the year (P <= 0 => zero). Unrounded components.
 
     Business income only: other income is taxed elsewhere (already withheld) and is not modelled.
     SE tax has no Social Security wage-base cap and no additional Medicare tax (a small overestimate
-    or underestimate is possible at high incomes). Federal income tax uses the single chosen bracket rate.
+    or underestimate is possible at high incomes). Federal income tax applies the progressive brackets for
+    the chosen filing status to the business taxable income alone (standard deduction not applied).
     """
     tbl = tbl or tables()
     P = max(0.0, float(P))
-    se = (tbl["se_ss_rate"] + tbl["se_medicare_rate"]) * P * tbl["se_net_factor"]
-    qbi = tbl["qbi_rate"] * max(0.0, P - se / 2) if settings.get("use_qbi", True) else 0.0
-    federal = float(settings.get("federal_bracket") or DEFAULT_SETTINGS["federal_bracket"]) * max(0.0, P - se / 2 - qbi)
+    social_security = tbl["se_ss_rate"] * P * tbl["se_net_factor"]
+    medicare = tbl["se_medicare_rate"] * P * tbl["se_net_factor"]
+    se = social_security + medicare  # SE tax IS the self-employed FICA; never add FICA on top
+    federal = bracket_tax(_fed_base(P, se, settings, tbl), _table(settings, tbl))
     state = (settings.get("state_rate") or 0.0) * P
-    return {"se": se, "federal": federal, "state": state, "total": se + federal + state}
+    return {"se": se, "social_security": social_security, "medicare": medicare,
+            "federal": federal, "state": state, "total": se + federal + state}
 
 
 def _set_aside(prev_total: float, new_total: float, buffer_pct: float) -> int:
@@ -89,20 +132,25 @@ def sequence(conn: sqlite3.Connection, year: int, settings: dict | None = None, 
     """Entries with computed `set_aside`, accounting for cumulative profit (bracket crossing)."""
     settings = settings or get_settings_tax(conn)
     tbl = tbl or tables()
-    cum, prev = 0.0, 0.0
+    cum, prev = 0.0, total_tax(0.0, settings, tbl)
+    scale = 1 + (settings["buffer_pct"] or 0) / 100
     out = []
     for e in entries(conn, year):
         cum += e["profit"]
-        tot = total_tax(max(0.0, cum), settings, tbl)["total"]
-        out.append({**e, "set_aside": _set_aside(prev, tot, settings["buffer_pct"])})
-        prev = tot
+        cur = total_tax(max(0.0, cum), settings, tbl)
+        # Components are the incremental tax scaled by the buffer, rounded to cents. set_aside is the
+        # whole-dollar ceil of the total, so the components can sum to a few cents less than set_aside.
+        breakdown = {k: r2(max(0.0, (cur[k] - prev[k]) * scale)) for k in ("social_security", "medicare", "federal", "state")}
+        breakdown["federal_rate"] = federal_rate_at(max(0.0, cum), settings, tbl)
+        out.append({**e, "set_aside": _set_aside(prev["total"], cur["total"], settings["buffer_pct"]), "breakdown": breakdown})
+        prev = cur
     return out
 
 
 def _public(e: dict) -> dict:
     p = e["profit"]
     return {"id": e["id"], "date": e["date"], "amount": r2(e["amount"]), "expenses": r2(e["expenses"]),
-            "profit": r2(p), "set_aside": e["set_aside"], "saved": e["saved"], "note": e["note"]}
+            "profit": r2(p), "set_aside": e["set_aside"], "breakdown": e["breakdown"], "saved": e["saved"], "note": e["note"]}
 
 
 def payouts(conn: sqlite3.Connection, year: int | None = None, today: date | None = None) -> list[dict]:
@@ -170,8 +218,8 @@ def summary(conn: sqlite3.Connection, year: int | None = None, today: date | Non
 
     notes = ["Estimate only, not tax advice. Rates come from config `tax:` (update each January). "
              "Self-employment tax ignores the Social Security wage-base cap and additional Medicare tax."]
-    notes.append(f"Federal income tax uses your {settings['federal_bracket']:.0%} bracket; it should be the bracket "
-                 "your total taxable income falls in.")
+    notes.append("Federal income tax uses the 2026 brackets on your side-business profit only (after the half-SE "
+                 "and QBI deductions; standard deduction not applied).")
     if tax["total"] < 1000:
         notes.append("Total estimated tax for the year is under $1,000, so quarterly estimated payments are "
                      "generally not required.")
@@ -184,6 +232,12 @@ def summary(conn: sqlite3.Connection, year: int | None = None, today: date | Non
     return {
         "year": year, "profit_ytd": r2(profit),
         "tax": {k: r2(v) for k, v in tax.items()},
+        "rates": {"social_security": tbl["se_ss_rate"] * tbl["se_net_factor"],
+                  "medicare": tbl["se_medicare_rate"] * tbl["se_net_factor"],
+                  "se": (tbl["se_ss_rate"] + tbl["se_medicare_rate"]) * tbl["se_net_factor"],
+                  "federal_marginal": federal_rate_at(P, settings, tbl),
+                  "federal_effective": round(tax["federal"] / P, 4) if P > 0 else 0.0,
+                  "state_rate": settings["state_rate"] or 0.0},
         "effective_rate": round(tax["total"] / P, 4) if P > 0 else 0.0,
         "marginal_rate": marginal,
         "set_aside_total": set_aside_total, "saved_total": r2(saved_total),
