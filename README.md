@@ -178,7 +178,7 @@ pip install -r backend/requirements.txt -r backend/requirements-dev.txt
 mkdir -p data
 python backend/scripts/make_sample_workbook.py     # creates data/sample_budget.xlsx
 cp data/sample_budget.xlsx data/budget.xlsx
-DASH_SCHEDULER=0 uvicorn app.main:app --reload --app-dir backend
+DASH_SCHEDULER=0 DASH_AUTH=0 uvicorn app.main:app --reload --app-dir backend   # DASH_AUTH=0: no login locally
 # http://127.0.0.1:8000   (API docs: /api/docs)
 cd backend && pytest
 ```
