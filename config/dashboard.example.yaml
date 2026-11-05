@@ -1,0 +1,131 @@
+# Copy to config/dashboard.yaml and edit to match your workbook.
+# Secrets (IMAP password, GitHub token) go in .env, never here.
+workbook:
+  path: data/budget.xlsx
+  sheets:
+    income:
+      name: Income
+      columns:
+        date: Date
+        source: Source
+        type: Type
+        amount: Amount
+        note: Note
+    transactions:
+      name: Transactions
+      columns:
+        date: Date
+        description: Description
+        category: Category
+        amount: Amount
+    balances:
+      name: Net Worth
+      columns:
+        date: Date
+        account: Account
+        kind: Type
+        balance: Balance
+    business:
+      name: Side Business
+      columns:
+        date: Date
+        description: Description
+        revenue: Revenue
+        expense: Expense
+    applications:
+      name: Job Applications
+      columns:
+        company: Company
+        role: Role
+        status: Status
+        applied_on: Applied On
+        last_update: Last Update
+        source: Source
+        url: URL
+        notes: Notes
+  drive_file_id: null
+  income_types:
+    tesla: paycheck
+    paycheck: paycheck
+    salary: paycheck
+    dividend: dividend
+    interest: interest
+    business: business
+  category_buckets:
+    rent: needs
+    mortgage: needs
+    utilities: needs
+    groceries: needs
+    insurance: needs
+    transportation: needs
+    gas: needs
+    car payment: needs
+    phone: needs
+    internet: needs
+    healthcare: needs
+    minimum debt payment: needs
+    dining: wants
+    entertainment: wants
+    shopping: wants
+    travel: wants
+    subscriptions: wants
+    savings: savings
+    investing: savings
+    401k: savings
+    roth ira: savings
+    brokerage: savings
+    emergency fund: savings
+    extra debt payment: savings
+    transfer: ignore
+  default_bucket: wants
+finance:
+  liquid_accounts:
+  - checking
+  - savings
+  - hysa
+  - emergency
+  invested_accounts:
+  - 401k
+  - roth
+  - ira
+  - brokerage
+  - hsa
+  - espp
+  - stock
+career:
+  github_user: AKworlds
+  email:
+    folder: INBOX
+    lookback_days: 30
+    initial_lookback_days: 3650
+    rules:
+      offer:
+      - offer letter
+      - pleased to offer
+      - job offer
+      rejected:
+      - not moving forward
+      - move forward with other candidates
+      - not selected
+      - decided to pursue
+      - will not be moving forward
+      - unable to offer you
+      interview:
+      - schedule an interview
+      - invite you to interview
+      - interview invitation
+      - interview request
+      - like to interview
+      - interview with
+      - schedule a call
+      - phone screen
+      - availability for an interview
+      applied:
+      - application received
+      - thank you for applying
+      - thanks for applying
+      - application has been submitted
+      - we received your application
+scheduler:
+  workbook_poll_seconds: 300
+  career_sync_hours: 6

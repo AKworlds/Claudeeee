@@ -1,0 +1,32 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="color-scheme" content="light dark">
+<title>Dashboard</title>
+<link rel="stylesheet" href="styles.css">
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='7' fill='%232563eb'/%3E%3Cpath d='M7 22l6-7 5 4 7-9' stroke='white' stroke-width='3' fill='none' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E">
+</head>
+<body>
+<header class="top">
+  <div class="top-row">
+    <h1>Dashboard</h1>
+    <span class="muted small" id="last-import">No import yet</span>
+  </div>
+  <nav id="tabs" aria-label="Sections">
+    <a href="#overview" data-tab="overview">Overview</a>
+    <a href="#money" data-tab="money">Money</a>
+    <a href="#milestones" data-tab="milestones">Milestones</a>
+    <a href="#forecast" data-tab="forecast">Forecast</a>
+    <a href="#career" data-tab="career">Career</a>
+    <a href="#settings" data-tab="settings">Settings</a>
+  </nav>
+</header>
+<main id="view" tabindex="-1"></main>
+<dialog id="dlg"><form method="dialog" id="dlg-form"></form></dialog>
+<div id="toasts" role="status" aria-live="polite"></div>
+<script src="vendor/chart.umd.min.js"></script>
+<script type="module" src="app.js"></script>
+</body>
+</html>
