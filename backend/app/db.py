@@ -74,6 +74,15 @@ CREATE TABLE IF NOT EXISTS business_payouts (
 );
 CREATE INDEX IF NOT EXISTS ix_payout_date ON business_payouts(date);
 
+-- Income added from the app (button on Overview/Money). Not touched by workbook imports;
+-- counted together with workbook income everywhere.
+CREATE TABLE IF NOT EXISTS income_entries (
+    id INTEGER PRIMARY KEY, date TEXT NOT NULL, source TEXT NOT NULL DEFAULT '',
+    type TEXT NOT NULL DEFAULT 'other', amount REAL NOT NULL, note TEXT NOT NULL DEFAULT '',
+    created_at TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS ix_income_entries_date ON income_entries(date);
+
 -- Estimated tax payments actually made (IRS / state).
 CREATE TABLE IF NOT EXISTS tax_payments (
     id INTEGER PRIMARY KEY, date TEXT NOT NULL, amount REAL NOT NULL, period TEXT NOT NULL DEFAULT '',

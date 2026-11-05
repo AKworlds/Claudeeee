@@ -515,7 +515,7 @@ async function viewSettings() {
 // ---------- taxes ----------
 const todayStr = () => { const d = new Date(); return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`; };
 const QSTATUS = { paid: ['good', 'Paid'], past_due: ['bad', 'Past due'], due_soon: ['warn', 'Due soon'], upcoming: ['', 'Upcoming'], nothing_due: ['', 'Nothing due'] };
-const FILING = [['single', 'Single'], ['married_joint', 'Married filing jointly'], ['head_of_household', 'Head of household']];
+const BRACKETS = [0.10, 0.12, 0.22, 0.24, 0.32, 0.35, 0.37];
 
 function bigInput(id, label, attrs = {}) {
   return h('label', { for: id }, label, h('input', Object.assign({ id, name: id }, attrs)));
@@ -540,12 +540,6 @@ async function viewTax() {
   const refreshTiles = async () => {
     try { const fresh = makeTiles(await get('/tax/summary')); tilesEl.replaceWith(fresh); tilesEl = fresh; } catch { /* keep old tiles */ }
   };
-
-  // (e) setup prompt
-  if (sum?.needs_setup) {
-    frag.append(h('div', { class: 'banner setup' }, h('strong', null, 'Finish setup: '), 'enter your annual gross W-2 income in the settings below so the set-aside amounts are accurate. Until then a flat 30% estimate is used.',
-      ' ', h('a', { href: '#tax-settings', onclick: (e) => { e.preventDefault(); document.getElementById('tax-settings')?.scrollIntoView({ behavior: 'smooth' }); document.getElementById('w2_income')?.focus({ preventScroll: true }); } }, 'Go to settings')));
-  }
 
   // (a) log payout
   const result = h('div', { class: 'payout-result', hidden: true, 'aria-live': 'polite' });
@@ -629,15 +623,14 @@ async function viewTax() {
   const serr = h('div', { class: 'errors', hidden: true, role: 'alert' });
   const sform = h('form', { novalidate: true }, serr,
     h('div', { class: 'form-grid' },
-      h('label', { for: 'filing_status' }, 'Filing status', h('select', { id: 'filing_status', name: 'filing_status' }, FILING.map(([v, t]) => h('option', { value: v, selected: v === (s.filing_status || 'single') }, t)))),
-      bigInput('w2_income', 'Annual gross W-2 income ($)', { type: 'text', inputmode: 'decimal', value: s.w2_income ?? '', placeholder: 'e.g. 85000' }),
+      h('label', { for: 'federal_bracket' }, 'Federal tax bracket', h('select', { id: 'federal_bracket', name: 'federal_bracket' }, BRACKETS.map((v) => h('option', { value: String(v), selected: Math.abs(v - (s.federal_bracket ?? 0.22)) < 1e-9 }, Math.round(v * 100) + '%')))),
       bigInput('state_rate', 'State income tax rate (%)', { type: 'text', inputmode: 'decimal', value: s.state_rate != null ? +(s.state_rate * 100).toFixed(3) : 0 }),
       bigInput('buffer_pct', 'Extra buffer (%)', { type: 'text', inputmode: 'decimal', value: s.buffer_pct ?? 0 })),
     h('button', { type: 'submit', class: 'primary' }, 'Save settings'));
   sform.addEventListener('submit', async (ev) => {
     ev.preventDefault();
     serr.hidden = true;
-    const body = Object.assign({}, s, { filing_status: sform.filing_status.value, w2_income: numOrNull(sform.w2_income.value.replace(/[$,\s]/g, '')), state_rate: (numOrNull(sform.state_rate.value) ?? 0) / 100, buffer_pct: numOrNull(sform.buffer_pct.value) ?? 0 });
+    const body = Object.assign({}, s, { federal_bracket: Number(sform.federal_bracket.value), state_rate: (numOrNull(sform.state_rate.value) ?? 0) / 100, buffer_pct: numOrNull(sform.buffer_pct.value) ?? 0 });
     try { await api('/tax/settings', { method: 'PUT', body }); toast('Settings saved'); reload(); }
     catch (e) { serr.hidden = false; serr.textContent = e.message; }
   });

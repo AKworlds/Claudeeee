@@ -59,21 +59,12 @@ DEFAULT_YAML: dict[str, Any] = {
         },
     },
     "scheduler": {"workbook_poll_seconds": 300, "career_sync_hours": 6},
-    # US federal figures for the side-business tax estimate. Update each January (IRS Rev. Proc.).
+    # Self-employment / QBI figures for the side-business tax estimate. Update each January.
     "tax": {
         "year": 2026,
-        "standard_deduction": {"single": 16100, "married_joint": 32200, "head_of_household": 24150},
-        "brackets": {  # [upper bound of bracket, rate]; null = no upper bound
-            "single": [[12400, 0.10], [50400, 0.12], [105700, 0.22], [201775, 0.24], [256225, 0.32], [640600, 0.35], [None, 0.37]],
-            "married_joint": [[24800, 0.10], [100800, 0.12], [211400, 0.22], [403550, 0.24], [512450, 0.32], [768700, 0.35], [None, 0.37]],
-            "head_of_household": [[17700, 0.10], [67450, 0.12], [105700, 0.22], [201750, 0.24], [256200, 0.32], [640600, 0.35], [None, 0.37]],
-        },
-        "ss_wage_base": 184500,
         "se_net_factor": 0.9235,
         "se_ss_rate": 0.124,
         "se_medicare_rate": 0.029,
-        "additional_medicare_rate": 0.009,
-        "additional_medicare_threshold": {"single": 200000, "married_joint": 250000, "head_of_household": 200000},
         "qbi_rate": 0.20,
         # Estimated-tax periods: [start MM-DD, end MM-DD, due date MM-DD, due in next year?]
         "quarters": [["01-01", "03-31", "04-15", False], ["04-01", "05-31", "06-15", False],

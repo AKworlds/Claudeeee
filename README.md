@@ -55,17 +55,16 @@ The dashboard is an installable web app (PWA). It must be opened over HTTPS (you
 
 The **Taxes** tab (second tab) tracks your side-business payouts and tells you how much to set aside for taxes.
 
-- **Log payout**: enter what you received (and optional expenses). You get "Set aside $X": the extra federal income tax, self-employment (SE) tax and state tax that payout adds on top of your W-2 job, using your year-to-date profit so bracket changes are accounted for. Move that money to savings and tap "I moved it to savings".
+- **Log payout**: enter what you received (and optional expenses). You get "Set aside $X": the extra federal income tax, self-employment (SE) tax and state tax that payout adds, using your year-to-date business profit so the amount reflects what you have earned so far. Move that money to savings and tap "I moved it to savings".
 - **Tiles**: profit so far this year, total set aside, total you've actually saved, shortfall (set aside minus saved, highlighted when positive) and your effective rate on business profit.
-- **Settings to fill in** (the tab prompts you until W-2 income is set; until then a flat 30% estimate is used):
-  - *Annual gross W-2 income* (before deductions), because it determines your bracket and Social Security wage-base room.
-  - *Filing status*.
+- **Settings**:
+  - *Federal tax bracket* (10% to 37%): pick the bracket your total taxable income falls in. If you are unsure, 22% is a safe default for most people. It is applied to business profit after the SE-tax deduction and the QBI deduction.
   - *State income tax rate*: Texas is 0.
   - *Buffer %*: optional extra cushion added to every set-aside.
 - **Quarterly estimated payments** (federal, Form 1040-ES) are normally due about **April 15, June 15, September 15 and January 15** of the following year. Each quarter shows the sum of set-asides for payouts in that period, what you have paid, and a status. Pay at irs.gov/payments (Direct Pay), then use **Mark paid** to record it.
-- **Alternative to estimated payments**: raise your W-4 withholding at your W-2 employer so enough tax is withheld during the year. Paying at least 100% of last year's tax (110% if your adjusted gross income was over $150,000), or 90% of this year's tax, is generally a safe harbor from underpayment penalties. If your total yearly tax from the side business is under $1,000, estimated payments are generally not required.
+- If your total yearly tax from the side business is under $1,000, estimated payments are generally not required.
 - Payouts you log here are added to any `Side Business` rows from your workbook for the tax year (and to the Side Business chart). Payouts survive workbook re-imports.
-- **Estimates only, not tax advice.** The tax tables live in `config/dashboard.yaml` under `tax:` and need a yearly update. Check with a tax professional or the IRS instructions for your situation.
+- **Estimates only, not tax advice.** The tax tables live in `config/dashboard.yaml` under `tax:` and need a yearly update. SE tax ignores the Social Security wage-base cap and additional Medicare tax. Check with a tax professional or the IRS instructions for your situation.
 
 ## Your budget workbook
 

@@ -2,7 +2,7 @@
 from __future__ import annotations
 
 from datetime import date, datetime, timezone
-from typing import Literal, Optional
+from typing import Optional
 
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel, Field, field_validator
@@ -24,11 +24,17 @@ def _iso(v):
 
 
 class SettingsIn(BaseModel):
-    filing_status: Optional[Literal["single", "married_joint", "head_of_household"]] = None
-    w2_income: Optional[float] = Field(None, ge=0)
+    federal_bracket: Optional[float] = None
     state_rate: Optional[float] = Field(None, ge=0, le=0.15)
     buffer_pct: Optional[float] = Field(None, ge=0, le=50)
     use_qbi: Optional[bool] = None
+
+    @field_validator("federal_bracket")
+    @classmethod
+    def _bracket(cls, v):
+        if v is not None and not any(abs(v - b) < 1e-9 for b in svc.FEDERAL_BRACKETS):
+            raise ValueError("must be one of 0.10, 0.12, 0.22, 0.24, 0.32, 0.35, 0.37")
+        return v and round(v, 2)
 
 
 class PayoutIn(BaseModel):
@@ -68,8 +74,7 @@ def get_settings_() -> dict:
 
 @router.put("/settings")
 def put_settings(body: SettingsIn) -> dict:
-    data = body.model_dump(exclude_unset=True)  # explicit null w2_income clears it
-    data = {k: v for k, v in data.items() if v is not None or k == "w2_income"}
+    data = {k: v for k, v in body.model_dump(exclude_unset=True).items() if v is not None}
     with get_conn() as conn:
         return svc.save_settings_tax(conn, data)
 

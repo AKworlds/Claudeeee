@@ -129,3 +129,26 @@ career:
 scheduler:
   workbook_poll_seconds: 300
   career_sync_hours: 6
+tax:
+  year: 2026
+  se_net_factor: 0.9235
+  se_ss_rate: 0.124
+  se_medicare_rate: 0.029
+  qbi_rate: 0.2
+  quarters:
+  - - 01-01
+    - 03-31
+    - 04-15
+    - false
+  - - 04-01
+    - 05-31
+    - 06-15
+    - false
+  - - 06-01
+    - 08-31
+    - 09-15
+    - false
+  - - 09-01
+    - 12-31
+    - 01-15
+    - true

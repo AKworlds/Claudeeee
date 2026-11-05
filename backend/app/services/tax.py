@@ -15,9 +15,9 @@ from ..config import get_settings
 
 SETTINGS_KEY = "tax_settings"
 DEFAULT_SETTINGS: dict[str, Any] = {
-    "filing_status": "single", "w2_income": None, "state_rate": 0.0, "buffer_pct": 0.0, "use_qbi": True,
+    "federal_bracket": 0.22, "state_rate": 0.0, "buffer_pct": 0.0, "use_qbi": True,
 }
-FALLBACK_RATE = 0.30  # used when w2_income is not set: 15.3% SE + ~15% income tax
+FEDERAL_BRACKETS = (0.10, 0.12, 0.22, 0.24, 0.32, 0.35, 0.37)
 
 
 def r2(x: float) -> float:
@@ -43,42 +43,19 @@ def save_settings_tax(conn: sqlite3.Connection, data: dict) -> dict:
 
 
 # ---------------------------------------------------------------- math
-def bracket_tax(income: float, brackets: list) -> float:
-    """Progressive tax on `income` using [[upper|None, rate], ...]."""
-    tax, lower = 0.0, 0.0
-    for upper, rate in brackets:
-        if income <= lower:
-            break
-        top = income if upper is None else min(income, upper)
-        tax += (top - lower) * rate
-        if upper is None:
-            break
-        lower = upper
-    return tax
-
-
 def total_tax(P: float, settings: dict, tbl: dict | None = None) -> dict:
-    """Tax owed on cumulative business profit P for the year (P <= 0 => zero). Unrounded components."""
+    """Tax owed on cumulative business profit P for the year (P <= 0 => zero). Unrounded components.
+
+    Business income only: other income is taxed elsewhere (already withheld) and is not modelled.
+    SE tax has no Social Security wage-base cap and no additional Medicare tax (a small overestimate
+    or underestimate is possible at high incomes). Federal income tax uses the single chosen bracket rate.
+    """
     tbl = tbl or tables()
     P = max(0.0, float(P))
-    fs = settings["filing_status"]
+    se = (tbl["se_ss_rate"] + tbl["se_medicare_rate"]) * P * tbl["se_net_factor"]
+    qbi = tbl["qbi_rate"] * max(0.0, P - se / 2) if settings.get("use_qbi", True) else 0.0
+    federal = float(settings.get("federal_bracket") or DEFAULT_SETTINGS["federal_bracket"]) * max(0.0, P - se / 2 - qbi)
     state = (settings.get("state_rate") or 0.0) * P
-    if settings.get("w2_income") is None:
-        return {"se": P * 0.153, "federal": P * (FALLBACK_RATE - 0.153) - state, "state": state,
-                "total": P * FALLBACK_RATE}
-    w2 = float(settings["w2_income"])
-    base = P * tbl["se_net_factor"]
-    thr = tbl["additional_medicare_threshold"][fs]
-    se = (tbl["se_ss_rate"] * min(base, max(0.0, tbl["ss_wage_base"] - w2))
-          + tbl["se_medicare_rate"] * base
-          + tbl["additional_medicare_rate"] * (max(0.0, w2 + base - thr) - max(0.0, w2 - thr)))
-    std = tbl["standard_deduction"][fs]
-    before_qbi = max(0.0, w2 + P - se / 2 - std)
-    qbi = 0.0
-    if settings.get("use_qbi", True):
-        qbi = min(tbl["qbi_rate"] * max(0.0, P - se / 2), tbl["qbi_rate"] * before_qbi)
-    br = tbl["brackets"][fs]
-    federal = bracket_tax(max(0.0, before_qbi - qbi), br) - bracket_tax(max(0.0, w2 - std), br)
     return {"se": se, "federal": federal, "state": state, "total": se + federal + state}
 
 
@@ -181,7 +158,6 @@ def summary(conn: sqlite3.Connection, year: int | None = None, today: date | Non
     profit = sum(e["profit"] for e in seq)
     P = max(0.0, profit)
     tax = total_tax(P, settings, tbl)
-    needs_setup = settings["w2_income"] is None
     set_aside_total = sum(e["set_aside"] for e in seq)
     saved_total = sum(e["saved"] or 0 for e in seq)
 
@@ -192,22 +168,21 @@ def summary(conn: sqlite3.Connection, year: int | None = None, today: date | Non
     annual = max(0.0, profit) / months * 12 if months else 0.0
     annual_tax = total_tax(annual, settings, tbl)["total"]
 
-    notes = ["Estimate only, not tax advice. Federal figures come from config `tax:` (update each January)."]
-    if needs_setup:
-        notes.append("Set your W-2 income in settings for an accurate estimate; using a flat 30% fallback rate.")
+    notes = ["Estimate only, not tax advice. Rates come from config `tax:` (update each January). "
+             "Self-employment tax ignores the Social Security wage-base cap and additional Medicare tax."]
+    notes.append(f"Federal income tax uses your {settings['federal_bracket']:.0%} bracket; it should be the bracket "
+                 "your total taxable income falls in.")
     if tax["total"] < 1000:
         notes.append("Total estimated tax for the year is under $1,000, so quarterly estimated payments are "
                      "generally not required.")
-    notes.append("Alternative to quarterly payments: raise your Tesla W-4 withholding (safe harbor: 100% of last "
-                 "year's tax, or 110% if prior-year income was high).")
-    if not needs_setup and 0 < P * tbl["se_net_factor"] < 400:
+    if 0 < P * tbl["se_net_factor"] < 400:
         notes.append("Net self-employment earnings under $400 for the year owe no SE tax; it is accrued here "
                      "in case you cross $400.")
     if not settings["state_rate"]:
         notes.append("State income tax is not included (state rate is 0).")
 
     return {
-        "year": year, "needs_setup": needs_setup, "profit_ytd": r2(profit),
+        "year": year, "profit_ytd": r2(profit),
         "tax": {k: r2(v) for k, v in tax.items()},
         "effective_rate": round(tax["total"] / P, 4) if P > 0 else 0.0,
         "marginal_rate": marginal,
