@@ -7,6 +7,7 @@ def settings_env(tmp_path, monkeypatch):
     monkeypatch.setenv("DASH_DATA_DIR", str(tmp_path))
     monkeypatch.setenv("DASH_CONFIG", str(tmp_path / "none.yaml"))
     monkeypatch.setenv("DASH_SCHEDULER", "0")
+    monkeypatch.setenv("DASH_AUTH", "0")  # auth has its own tests
     from app.config import get_settings
     get_settings.cache_clear()
     from app.db import init_db

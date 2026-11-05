@@ -3,7 +3,7 @@
 One place for money and career progress: net worth, income, 50/30/20 budget, milestones, forecast, job applications, certifications and projects. Single user, desktop and phone.
 
 - Backend: FastAPI + SQLite (`backend/`). Frontend: static SPA served by FastAPI (`frontend/`, no build step).
-- Deploy: Docker Compose, `app` + `caddy` (automatic HTTPS and basic auth). See `PLAN.md` for the architecture and API.
+- Deploy: Docker Compose, `app` + `caddy` (automatic HTTPS; the app has its own password login and installs as a phone app). See `PLAN.md` for the architecture and API.
 
 ## Deploy on a Hostinger VPS (Ubuntu)
 
@@ -26,19 +26,46 @@ One place for money and career progress: net worth, income, 50/30/20 budget, mil
    cp config/dashboard.example.yaml config/dashboard.yaml
    ```
    The container runs as uid 1000; if your VPS user has a different uid run `sudo chown -R 1000:1000 data`.
-5. **Password hash**:
+5. **Login password and secret** (the app has its own sign-in page, no username):
    ```bash
-   docker run --rm caddy:2.8 caddy hash-password
+   docker compose -f deploy/docker-compose.yml build app
+   docker compose -f deploy/docker-compose.yml run --rm -w /srv/dashboard/backend app python -m app.auth hash     # prompts twice, prints scrypt$...
+   docker compose -f deploy/docker-compose.yml run --rm -w /srv/dashboard/backend app python -m app.auth secret   # random cookie-signing key
    ```
-   Put the output in `.env` as `DASH_PASSWORD_HASH`, **doubling every `$` to `$$`**. Also set `DASH_DOMAIN` and `DASH_USER`.
+   Put them in `.env` as `DASH_PASSWORD_HASH` (**double every `$` to `$$`**; the scrypt format uses `$` separators) and `DASH_SECRET_KEY`. Also set `DASH_DOMAIN`. If either is missing the app refuses all requests with "Login not configured" (it fails closed). Failed logins are limited to 5 per 15 minutes per IP (30 across all IPs); sessions last 30 days. To sign out every device, change `DASH_SECRET_KEY` and restart.
 6. **Start**:
    ```bash
    docker compose -f deploy/docker-compose.yml up -d --build
    docker compose -f deploy/docker-compose.yml logs -f
    ```
-   Open `https://dash.yourdomain.com` and sign in. Caddy fetches the certificate on first request (needs ports 80/443 open and DNS propagated).
+   Open `https://dash.yourdomain.com` and sign in with your password. Caddy fetches the certificate on first request (needs ports 80/443 open and DNS propagated).
 
 Data layout: host `./data` is mounted at `/srv/dashboard/data` inside the container (SQLite DB, workbook, backups), so the default `workbook.path: data/budget.xlsx` works unchanged. Host `./config` is mounted read-only at `/config`.
+
+## Use it on your phone
+
+The dashboard is an installable web app (PWA). It must be opened over HTTPS (your Caddy domain) to install.
+
+- **iPhone**: open the site in Safari, tap Share, then **Add to Home Screen**. Launch it from the home screen icon (full screen, no browser bar). Sign in once; the session lasts 30 days.
+- **Android**: open the site in Chrome, menu (three dots), then **Install app** (or **Add to Home screen**). Long-press the icon and choose **Log payout** to jump straight to the Taxes tab's payout form.
+- The app shell is cached for fast start, but data always comes live from the server (nothing under `/api` is cached), so you need a connection to see numbers.
+- **Sign out** is in the header. Signing in again on a new device just needs the password.
+
+## Side business taxes
+
+The **Taxes** tab (second tab) tracks your side-business payouts and tells you how much to set aside for taxes.
+
+- **Log payout**: enter what you received (and optional expenses). You get "Set aside $X": the extra federal income tax, self-employment (SE) tax and state tax that payout adds on top of your W-2 job, using your year-to-date profit so bracket changes are accounted for. Move that money to savings and tap "I moved it to savings".
+- **Tiles**: profit so far this year, total set aside, total you've actually saved, shortfall (set aside minus saved, highlighted when positive) and your effective rate on business profit.
+- **Settings to fill in** (the tab prompts you until W-2 income is set; until then a flat 30% estimate is used):
+  - *Annual gross W-2 income* (before deductions), because it determines your bracket and Social Security wage-base room.
+  - *Filing status*.
+  - *State income tax rate*: Texas is 0.
+  - *Buffer %*: optional extra cushion added to every set-aside.
+- **Quarterly estimated payments** (federal, Form 1040-ES) are normally due about **April 15, June 15, September 15 and January 15** of the following year. Each quarter shows the sum of set-asides for payouts in that period, what you have paid, and a status. Pay at irs.gov/payments (Direct Pay), then use **Mark paid** to record it.
+- **Alternative to estimated payments**: raise your W-4 withholding at your W-2 employer so enough tax is withheld during the year. Paying at least 100% of last year's tax (110% if your adjusted gross income was over $150,000), or 90% of this year's tax, is generally a safe harbor from underpayment penalties. If your total yearly tax from the side business is under $1,000, estimated payments are generally not required.
+- Payouts you log here are added to any `Side Business` rows from your workbook for the tax year (and to the Side Business chart). Payouts survive workbook re-imports.
+- **Estimates only, not tax advice.** The tax tables live in `config/dashboard.yaml` under `tax:` and need a yearly update. Check with a tax professional or the IRS instructions for your situation.
 
 ## Your budget workbook
 

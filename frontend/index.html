@@ -2,9 +2,17 @@
 <html lang="en">
 <head>
 <meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <meta name="color-scheme" content="light dark">
+<meta name="theme-color" content="#ffffff" media="(prefers-color-scheme: light)">
+<meta name="theme-color" content="#19202a" media="(prefers-color-scheme: dark)">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="default">
+<meta name="apple-mobile-web-app-title" content="Dashboard">
 <title>Dashboard</title>
+<link rel="manifest" href="/manifest.webmanifest">
+<link rel="apple-touch-icon" href="/icons/apple-touch-icon.png">
 <link rel="stylesheet" href="styles.css">
 <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='7' fill='%232563eb'/%3E%3Cpath d='M7 22l6-7 5 4 7-9' stroke='white' stroke-width='3' fill='none' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E">
 </head>
@@ -12,10 +20,12 @@
 <header class="top">
   <div class="top-row">
     <h1>Dashboard</h1>
-    <span class="muted small" id="last-import">No import yet</span>
+    <div class="row top-actions"><span class="muted small" id="last-import">No import yet</span>
+    <button type="button" class="small" id="signout">Sign out</button></div>
   </div>
   <nav id="tabs" aria-label="Sections">
     <a href="#overview" data-tab="overview">Overview</a>
+    <a href="#tax" data-tab="tax">Taxes</a>
     <a href="#money" data-tab="money">Money</a>
     <a href="#milestones" data-tab="milestones">Milestones</a>
     <a href="#forecast" data-tab="forecast">Forecast</a>

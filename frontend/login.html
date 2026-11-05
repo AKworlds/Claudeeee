@@ -1,0 +1,32 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="color-scheme" content="light dark">
+<meta name="theme-color" content="#ffffff" media="(prefers-color-scheme: light)">
+<meta name="theme-color" content="#19202a" media="(prefers-color-scheme: dark)">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-title" content="Dashboard">
+<title>Sign in - Dashboard</title>
+<link rel="manifest" href="/manifest.webmanifest">
+<link rel="apple-touch-icon" href="/icons/apple-touch-icon.png">
+<link rel="icon" type="image/png" href="/icons/icon-192.png">
+<link rel="stylesheet" href="styles.css">
+</head>
+<body class="login-page">
+<main class="login-card card">
+  <h1>Dashboard</h1>
+  <p class="muted">Sign in to continue.</p>
+  <form id="login-form">
+    <div class="errors" id="login-error" role="alert" hidden></div>
+    <label for="password">Password
+      <input id="password" name="password" type="password" autocomplete="current-password" required autofocus>
+    </label>
+    <button type="submit" class="primary big" id="login-btn">Sign in</button>
+  </form>
+</main>
+<script type="module" src="login.js"></script>
+</body>
+</html>

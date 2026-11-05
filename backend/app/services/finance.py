@@ -50,7 +50,7 @@ def month_window(end: str, n: int) -> list[str]:
 def end_month(conn: sqlite3.Connection, today: date) -> str:
     """Latest month with any data across the finance tables, else today's month."""
     best = ""
-    for t in ("income", "transactions", "balances", "business"):
+    for t in ("income", "transactions", "balances", "business", "business_payouts"):
         v = conn.execute(f"SELECT MAX(substr(date,1,7)) FROM {t}").fetchone()[0]
         best = max(best, v or "")
     return best or month_of(today)
@@ -63,7 +63,7 @@ def series_end(conn: sqlite3.Connection, today: date) -> str:
     if end >= cur:
         prev = month_add(cur, -1)
         has_prev = any(conn.execute(f"SELECT 1 FROM {t} WHERE date < ? LIMIT 1", (cur + "-01",)).fetchone()
-                       for t in ("income", "transactions", "business"))
+                       for t in ("income", "transactions", "business", "business_payouts"))
         return prev if has_prev else end
     return end
 
@@ -264,7 +264,9 @@ def forecast(conn: sqlite3.Connection, today: date | None = None) -> dict:
 def business(conn: sqlite3.Connection, months: int = 12, today: date | None = None) -> dict:
     today = today or date.today()
     agg = {r["m"]: (r["rev"], r["exp"]) for r in conn.execute(
-        "SELECT substr(date,1,7) m, SUM(revenue) rev, SUM(expense) exp FROM business GROUP BY m")}
+        "SELECT m, SUM(rev) rev, SUM(exp) exp FROM ("
+        " SELECT substr(date,1,7) m, revenue rev, expense exp FROM business"
+        " UNION ALL SELECT substr(date,1,7), amount, expenses FROM business_payouts) GROUP BY m")}
     pts = []
     for m in month_window(series_end(conn, today), months):
         rev, exp = agg.get(m, (0.0, 0.0))
@@ -274,8 +276,10 @@ def business(conn: sqlite3.Connection, months: int = 12, today: date | None = No
 
 def business_profit_ytd(conn: sqlite3.Connection, today: date | None = None) -> float:
     today = today or date.today()
-    v = conn.execute("SELECT COALESCE(SUM(revenue - expense), 0) FROM business WHERE substr(date,1,4)=?",
-                     (str(today.year),)).fetchone()[0]
+    y = str(today.year)
+    v = conn.execute("SELECT COALESCE(SUM(revenue - expense), 0) FROM business WHERE substr(date,1,4)=?", (y,)).fetchone()[0]
+    v += conn.execute("SELECT COALESCE(SUM(amount - expenses), 0) FROM business_payouts WHERE substr(date,1,4)=?",
+                      (y,)).fetchone()[0]
     return r2(v)
 
 

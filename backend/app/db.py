@@ -66,6 +66,19 @@ CREATE TABLE IF NOT EXISTS projects (
 );
 
 CREATE TABLE IF NOT EXISTS settings (key TEXT PRIMARY KEY, value TEXT NOT NULL);
+
+-- Side-business payouts logged from the app (phone). Not touched by workbook imports.
+CREATE TABLE IF NOT EXISTS business_payouts (
+    id INTEGER PRIMARY KEY, date TEXT NOT NULL, amount REAL NOT NULL, expenses REAL NOT NULL DEFAULT 0,
+    note TEXT NOT NULL DEFAULT '', saved REAL, created_at TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS ix_payout_date ON business_payouts(date);
+
+-- Estimated tax payments actually made (IRS / state).
+CREATE TABLE IF NOT EXISTS tax_payments (
+    id INTEGER PRIMARY KEY, date TEXT NOT NULL, amount REAL NOT NULL, period TEXT NOT NULL DEFAULT '',
+    note TEXT NOT NULL DEFAULT ''
+);
 """
 
 

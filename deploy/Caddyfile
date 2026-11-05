@@ -1,15 +1,13 @@
 {$DASH_DOMAIN} {
 	encode gzip
 
-	basic_auth {
-		{$DASH_USER} {$DASH_PASSWORD_HASH}
-	}
+	# Login is handled by the app itself (session cookie), not Caddy basic auth.
 
 	header {
 		Strict-Transport-Security "max-age=31536000; includeSubDomains"
 		X-Content-Type-Options "nosniff"
 		Referrer-Policy "no-referrer"
-		Content-Security-Policy "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; connect-src 'self'; frame-ancestors 'none'; base-uri 'self'; form-action 'self'"
+		Content-Security-Policy "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; connect-src 'self'; frame-ancestors 'none'; base-uri 'self'; form-action 'self'; manifest-src 'self'; worker-src 'self'"
 		-Server
 	}
 

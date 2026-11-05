@@ -11,7 +11,8 @@ from fastapi.staticfiles import StaticFiles
 
 from .config import BASE_DIR, get_settings
 from .db import init_db
-from .routers import career, finance
+from .auth import install_auth
+from .routers import career, finance, tax
 
 FRONTEND_DIR = BASE_DIR / "frontend"
 
@@ -34,6 +35,8 @@ def create_app() -> FastAPI:
     app = FastAPI(title="Personal Dashboard", lifespan=lifespan, docs_url="/api/docs", openapi_url="/api/openapi.json")
     app.include_router(finance.router, prefix="/api/finance", tags=["finance"])
     app.include_router(career.router, prefix="/api/career", tags=["career"])
+    app.include_router(tax.router, prefix="/api/tax", tags=["tax"])
+    install_auth(app)
 
     @app.get("/api/health")
     def health() -> dict:

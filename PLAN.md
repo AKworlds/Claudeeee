@@ -109,3 +109,54 @@ Both run on the scheduler (default every 6h) and on demand from the UI.
 - `scripts/make_template_workbook.py` builds a blank workbook (tables, dropdowns, live Summary); served by `GET /api/finance/template`.
 - Optional `Job Applications` sheet (`workbook.sheets.applications`): upserted into `applications` (`external_id` `sheet:<sha1>`, merges into the matching `email:` row); never deletes. Count appears in the import message only.
 - `services/drive_sync.py`: service account (`GOOGLE_SERVICE_ACCOUNT_FILE`) + `workbook.drive_file_id`; downloads/exports the file when `modifiedTime` changes, imports, keeps a local copy. Scheduler runs it every `workbook_poll_seconds`. Endpoints: `GET /api/finance/drive`, `POST /api/finance/drive/sync` (400 unconfigured, 502 on SyncError). Settings keys `drive_last_modified`, `last_sync_drive`.
+
+## Side-business tax tracker (v2)
+
+Purpose: log each side-business payout (usually from the phone) and get "set aside $X" for taxes,
+plus quarterly estimated-payment amounts and due dates. Estimates only; not tax advice.
+
+Data: `business_payouts` (app-entered, survives workbook imports) and `tax_payments` (see db.py).
+Business profit for tax = payouts (amount - expenses) + workbook `business` rows (revenue - expense)
+for the tax year. The Side Business chart (`/api/finance/business`) also includes payouts.
+
+Settings (settings key `tax_settings`, merged over defaults):
+`{filing_status: single|married_joint|head_of_household = "single", w2_income: number|null (annual GROSS
+W-2 wages; null => needs_setup), state_rate: 0.0 (fraction; Texas = 0), buffer_pct: 0 (extra % added to
+each set-aside), use_qbi: true}`. Federal tables live in config `tax:` (yearly update).
+
+Math for year Y and cumulative business profit P (P >= 0; losses => 0 tax):
+- SE base = P * se_net_factor. SE tax = se_ss_rate * min(base, max(0, ss_wage_base - w2)) + se_medicare_rate * base
+  + additional_medicare_rate * max(0, w2 + base - threshold) - additional_medicare_rate * max(0, w2 - threshold).
+  If base < 400 at year end the IRS charges no SE tax; keep accruing during the year but add a note.
+- QBI = qbi_rate * max(0, P - SE/2) if use_qbi, capped at qbi_rate * taxable income before QBI.
+- Federal = tax(max(0, w2 + P - SE/2 - QBI - std)) - tax(max(0, w2 - std)) using the bracket table.
+- State = state_rate * P. Total(P) = SE + Federal + State.
+- Per payout (chronological within the year): set_aside_i = (Total(P_i) - Total(P_{i-1})) * (1 + buffer_pct/100),
+  rounded up to whole dollars. This accounts for crossing brackets.
+- needs_setup (w2_income null): still answer, using a flat 30% fallback rate (15.3% SE + ~15% income), with a note.
+- marginal_rate = set_aside of a hypothetical extra $100 / 100. effective_rate = Total(P)/P.
+- Quarters from config `tax.quarters`: amount = sum of set_asides for payouts dated in the period;
+  paid = sum of tax_payments whose `period` equals the quarter label (e.g. "2026-Q3"); status past_due|due_soon (<=30 days)|upcoming|paid.
+- Notes: < $1,000 total year tax => estimated payments generally not required; alternative is raising Tesla W-4
+  withholding (safe harbor 100%/110% of last year's tax); state not included when state_rate = 0.
+
+API (prefix /api/tax), all JSON:
+- `GET/PUT /settings` → settings object (PUT validates: rates 0..0.15 state, buffer 0..50, w2 >= 0 or null).
+- `GET /payouts?year=` → `{payouts:[{id,date,amount,expenses,profit,set_aside,saved,note}]}` newest first.
+- `POST /payouts` `{date?=today, amount>0, expenses>=0=0, note?, saved?}` → the payout incl. computed `set_aside`
+  and `{rate}` (= set_aside/profit). `PUT /payouts/{id}` partial (e.g. `{saved: 412}`), `DELETE /payouts/{id}`.
+- `GET /summary?year=` → `{year, needs_setup, profit_ytd, tax:{se, federal, state, total}, effective_rate,
+  marginal_rate, set_aside_total, saved_total, shortfall, quarters:[{label, start, end, due, amount, paid, status}],
+  projection:{annual_profit, annual_tax} (YTD profit annualized by months elapsed), notes:[str]}`.
+- `GET/POST /payments`, `DELETE /payments/{id}`; POST `{date?, amount>0, period, note?}`.
+
+## Phone app + login (v2)
+
+- PWA: `frontend/manifest.webmanifest`, `frontend/sw.js` (app-shell cache, network-first, never caches /api),
+  icons in `frontend/icons/` (192, 512, maskable 512, apple-touch 180). Shortcut "Log payout" → `/#tax`.
+- Login replaces Caddy basic auth (basic auth is unreliable in iOS home-screen apps): `app/auth.py`.
+  Env: `DASH_PASSWORD_HASH` (scrypt, made by `python -m app.auth hash`), `DASH_SECRET_KEY` (cookie signing),
+  `DASH_AUTH` (default 1; tests/dev set 0), `DASH_COOKIE_SECURE` (default 1). HMAC-signed session cookie,
+  HttpOnly, SameSite=Lax, 30-day expiry. Non-GET /api requests must send header `X-Dash: 1` (CSRF guard).
+  Public paths: /login.html, /api/auth/*, /api/health, /manifest.webmanifest, /icons/*, /sw.js, styles.css, login.js.
+  Failed logins rate-limited per client IP (5 per 15 min → 429).

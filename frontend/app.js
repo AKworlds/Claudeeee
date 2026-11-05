@@ -40,12 +40,13 @@ class ApiError extends Error {
 }
 
 async function api(path, { method = 'GET', body, form } = {}) {
-  const opts = { method, headers: {} };
+  const opts = { method, headers: { 'X-Dash': '1' } };
   if (form) opts.body = form;
   else if (body !== undefined) { opts.body = JSON.stringify(body); opts.headers['Content-Type'] = 'application/json'; }
   let res;
   try { res = await fetch('/api' + path, opts); }
   catch (e) { throw new ApiError('Network error: ' + e.message, 0); }
+  if (res.status === 401) { location.replace('/login.html'); throw new ApiError('Signed out', 401); }
   let data = null;
   const text = await res.text();
   if (text) { try { data = JSON.parse(text); } catch { data = text; } }
@@ -511,8 +512,146 @@ async function viewSettings() {
   return frag;
 }
 
+// ---------- taxes ----------
+const todayStr = () => { const d = new Date(); return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`; };
+const QSTATUS = { paid: ['good', 'Paid'], past_due: ['bad', 'Past due'], due_soon: ['warn', 'Due soon'], upcoming: ['', 'Upcoming'], nothing_due: ['', 'Nothing due'] };
+const FILING = [['single', 'Single'], ['married_joint', 'Married filing jointly'], ['head_of_household', 'Head of household']];
+
+function bigInput(id, label, attrs = {}) {
+  return h('label', { for: id }, label, h('input', Object.assign({ id, name: id }, attrs)));
+}
+const numOrNull = (v) => (String(v).trim() === '' || isNaN(Number(v)) ? null : Number(v));
+
+async function viewTax() {
+  const [sum, pay, set] = await Promise.all([get('/tax/summary'), get('/tax/payouts'), get('/tax/settings')]);
+  const frag = h('div', { class: 'tax' });
+  const reload = () => render();
+  const makeTiles = (sm) => {
+    if (!sm) return emptyState('Tax summary unavailable.');
+    const short = sm.shortfall || 0;
+    return h('div', { class: 'grid tiles' },
+      tile('Profit ' + (sm.year ?? 'YTD'), money(sm.profit_ytd), sm.tax ? 'Est. tax ' + money(sm.tax.total) : null),
+      tile('Set aside', money(sm.set_aside_total)),
+      tile('Saved', money(sm.saved_total)),
+      tile('Shortfall', money(short), short > 0 ? 'Move this to savings' : 'On track', short > 0 ? 'bad' : 'good'),
+      tile('Effective rate', pct(sm.effective_rate), sm.marginal_rate != null ? 'Next $100: ' + pct(sm.marginal_rate) : null));
+  };
+  let tilesEl = makeTiles(sum);  // refreshed in place after logging a payout
+  const refreshTiles = async () => {
+    try { const fresh = makeTiles(await get('/tax/summary')); tilesEl.replaceWith(fresh); tilesEl = fresh; } catch { /* keep old tiles */ }
+  };
+
+  // (e) setup prompt
+  if (sum?.needs_setup) {
+    frag.append(h('div', { class: 'banner setup' }, h('strong', null, 'Finish setup: '), 'enter your annual gross W-2 income in the settings below so the set-aside amounts are accurate. Until then a flat 30% estimate is used.',
+      ' ', h('a', { href: '#tax-settings', onclick: (e) => { e.preventDefault(); document.getElementById('tax-settings')?.scrollIntoView({ behavior: 'smooth' }); document.getElementById('w2_income')?.focus({ preventScroll: true }); } }, 'Go to settings')));
+  }
+
+  // (a) log payout
+  const result = h('div', { class: 'payout-result', hidden: true, 'aria-live': 'polite' });
+  const err = h('div', { class: 'errors', hidden: true, role: 'alert' });
+  const submit = h('button', { type: 'submit', class: 'primary big' }, 'Log payout');
+  const form = h('form', { class: 'payout-form', novalidate: true },
+    err,
+    bigInput('p_amount', 'Payout amount', { type: 'text', inputmode: 'decimal', autocomplete: 'off', placeholder: '0.00', class: 'huge', required: true }),
+    h('div', { class: 'form-grid' },
+      bigInput('p_expenses', 'Expenses (optional)', { type: 'text', inputmode: 'decimal', autocomplete: 'off', placeholder: '0.00' }),
+      bigInput('p_date', 'Date', { type: 'date', value: todayStr() })),
+    bigInput('p_note', 'Note (optional)', { type: 'text', autocomplete: 'off' }),
+    submit);
+  form.addEventListener('submit', async (ev) => {
+    ev.preventDefault();
+    err.hidden = true;
+    const amount = numOrNull(form.p_amount.value.replace(/[$,\s]/g, ''));
+    const expenses = numOrNull(form.p_expenses.value.replace(/[$,\s]/g, ''));
+    if (!amount || amount <= 0) { err.hidden = false; err.textContent = 'Enter the payout amount.'; return; }
+    submit.disabled = true;
+    try {
+      const p = await api('/tax/payouts', { method: 'POST', body: { amount, expenses: expenses || 0, date: form.p_date.value || undefined, note: form.p_note.value.trim() || undefined } });
+      const rate = p.rate ?? (p.profit > 0 ? p.set_aside / p.profit : null);
+      const moved = h('button', { type: 'button', class: 'primary big', onclick: async (e) => {
+        e.target.disabled = true;
+        try { await api('/tax/payouts/' + p.id, { method: 'PUT', body: { saved: p.set_aside } }); toast('Marked as saved'); reload(); }
+        catch (x) { e.target.disabled = false; toast(x.message, 'error'); }
+      } }, 'I moved it to savings');
+      result.replaceChildren(h('div', { class: 'label' }, 'Taxes on this payout'), h('div', { class: 'big-num' }, 'Set aside ' + money(p.set_aside)),
+        h('div', { class: 'muted' }, rate != null ? `${pct(rate)} of ${money(p.profit ?? amount - (expenses || 0), true)} profit` : ''), moved,
+        h('button', { type: 'button', onclick: reload }, 'Done'));
+      result.hidden = false;
+      form.hidden = true;
+      result.scrollIntoView({ block: 'start', behavior: 'smooth' });
+      refreshTiles();
+    } catch (e) {
+      err.hidden = false;
+      err.textContent = e.message;
+    } finally { submit.disabled = false; }
+  });
+  frag.append(h('section', { class: 'card', id: 'log-payout' }, h('h2', null, 'Log payout'), form, result));
+
+  // (b) tiles
+  frag.append(tilesEl);
+
+  // (c) quarters
+  const qCard = h('section', { class: 'card' }, h('h2', null, 'Quarterly estimated payments'));
+  const qs = sum?.quarters || [];
+  if (!qs.length) qCard.append(h('div', { class: 'empty' }, 'No quarters yet.'));
+  for (const q of qs) {
+    const [cls, label] = QSTATUS[q.status] || ['', q.status];
+    const owed = Math.max(0, (q.amount || 0) - (q.paid || 0));
+    qCard.append(h('div', { class: 'qrow' },
+      h('div', { class: 'qmain' }, h('strong', null, q.label), h('span', { class: 'badge ' + cls }, label), h('div', { class: 'small muted' }, 'Due ' + q.due)),
+      h('div', { class: 'qnums' }, h('div', null, money(q.amount)), h('div', { class: 'small muted' }, 'paid ' + money(q.paid))),
+      owed > 0 && h('button', { type: 'button', onclick: () => openForm({ title: 'Mark ' + q.label + ' paid',
+        fields: [{ key: 'amount', label: 'Amount', type: 'number', required: true }, { key: 'date', label: 'Date', type: 'date' }, { key: 'note', label: 'Note' }],
+        values: { amount: owed || q.amount, date: todayStr() },
+        onSave: async (v) => { await api('/tax/payments', { method: 'POST', body: { amount: v.amount, date: v.date || undefined, period: q.label, note: v.note || undefined } }); toast('Payment recorded'); reload(); } }) }, 'Mark paid')));
+  }
+  frag.append(qCard);
+
+  // (d) payouts
+  const list = pay?.payouts || [];
+  const pCard = h('section', { class: 'card' }, h('h2', null, 'Payouts'));
+  if (!list.length) pCard.append(h('div', { class: 'empty' }, 'No payouts logged yet.'));
+  else pCard.append(h('div', { class: 'table-wrap' }, h('table', null,
+    h('thead', null, h('tr', null, ['Date', 'Amount', 'Expenses', 'Set aside', 'Saved', ''].map((t, i) => h('th', { class: i > 0 && i < 5 ? 'num' : '' }, t)))),
+    h('tbody', null, list.map((p) => h('tr', null,
+      h('td', null, p.date), h('td', { class: 'num' }, money(p.amount, true)), h('td', { class: 'num' }, money(p.expenses, true)), h('td', { class: 'num' }, money(p.set_aside)),
+      h('td', { class: 'num' }, (p.saved || 0) >= (p.set_aside || 0) && p.set_aside > 0 ? h('span', { class: 'badge good' }, money(p.saved)) : money(p.saved)),
+      h('td', { class: 'actions' },
+        (p.saved || 0) < (p.set_aside || 0) && h('button', { class: 'small', onclick: async () => { try { await api('/tax/payouts/' + p.id, { method: 'PUT', body: { saved: p.set_aside } }); reload(); } catch (e) { toast(e.message, 'error'); } } }, 'Mark saved'),
+        h('button', { class: 'small', onclick: () => openForm({ title: 'Edit payout', fields: [{ key: 'amount', label: 'Amount', type: 'number', required: true }, { key: 'expenses', label: 'Expenses', type: 'number' }, { key: 'date', label: 'Date', type: 'date' }, { key: 'saved', label: 'Saved', type: 'number' }, { key: 'note', label: 'Note' }], values: p,
+          onSave: async (v) => { await api('/tax/payouts/' + p.id, { method: 'PUT', body: { amount: v.amount, expenses: v.expenses ?? 0, date: v.date || undefined, saved: v.saved ?? 0, note: v.note } }); reload(); } }) }, 'Edit'),
+        h('button', { class: 'small danger', onclick: async () => { if (!confirmDelete(`payout of ${money(p.amount, true)} on ${p.date}`)) return; try { await api('/tax/payouts/' + p.id, { method: 'DELETE' }); reload(); } catch (e) { toast(e.message, 'error'); } } }, 'Delete'))))))));
+  frag.append(pCard);
+
+  // (e) settings
+  const s = set || {};
+  const serr = h('div', { class: 'errors', hidden: true, role: 'alert' });
+  const sform = h('form', { novalidate: true }, serr,
+    h('div', { class: 'form-grid' },
+      h('label', { for: 'filing_status' }, 'Filing status', h('select', { id: 'filing_status', name: 'filing_status' }, FILING.map(([v, t]) => h('option', { value: v, selected: v === (s.filing_status || 'single') }, t)))),
+      bigInput('w2_income', 'Annual gross W-2 income ($)', { type: 'text', inputmode: 'decimal', value: s.w2_income ?? '', placeholder: 'e.g. 85000' }),
+      bigInput('state_rate', 'State income tax rate (%)', { type: 'text', inputmode: 'decimal', value: s.state_rate != null ? +(s.state_rate * 100).toFixed(3) : 0 }),
+      bigInput('buffer_pct', 'Extra buffer (%)', { type: 'text', inputmode: 'decimal', value: s.buffer_pct ?? 0 })),
+    h('button', { type: 'submit', class: 'primary' }, 'Save settings'));
+  sform.addEventListener('submit', async (ev) => {
+    ev.preventDefault();
+    serr.hidden = true;
+    const body = Object.assign({}, s, { filing_status: sform.filing_status.value, w2_income: numOrNull(sform.w2_income.value.replace(/[$,\s]/g, '')), state_rate: (numOrNull(sform.state_rate.value) ?? 0) / 100, buffer_pct: numOrNull(sform.buffer_pct.value) ?? 0 });
+    try { await api('/tax/settings', { method: 'PUT', body }); toast('Settings saved'); reload(); }
+    catch (e) { serr.hidden = false; serr.textContent = e.message; }
+  });
+  frag.append(h('section', { class: 'card', id: 'tax-settings' }, h('h2', null, 'Tax settings'), set ? sform : h('div', { class: 'empty' }, 'Settings unavailable.')));
+
+  // (f) notes + disclaimer
+  const notes = sum?.notes || [];
+  if (notes.length) frag.append(h('section', { class: 'card' }, h('h2', null, 'Notes'), h('ul', { class: 'notes' }, notes.map((n) => h('li', null, n)))));
+  frag.append(h('p', { class: 'muted small disclaimer' }, 'Estimates only, not tax advice.'));
+  return frag;
+}
+
 // ---------- router ----------
-const VIEWS = { overview: viewOverview, money: viewMoney, milestones: viewMilestones, forecast: viewForecast, career: viewCareer, settings: viewSettings };
+const VIEWS = { overview: viewOverview, tax: viewTax, money: viewMoney, milestones: viewMilestones, forecast: viewForecast, career: viewCareer, settings: viewSettings };
 let renderSeq = 0;
 async function render() {
   const tab = VIEWS[location.hash.slice(1)] ? location.hash.slice(1) : 'overview';
@@ -533,5 +672,10 @@ async function render() {
 }
 window.addEventListener('hashchange', () => { window.scrollTo(0, 0); render(); view.focus({ preventScroll: true }); });
 window.matchMedia('(prefers-color-scheme: dark)').addEventListener('change', () => render());
+$('#signout').addEventListener('click', async () => {
+  try { await fetch('/api/auth/logout', { method: 'POST', headers: { 'X-Dash': '1' } }); } catch { /* ignore */ }
+  location.replace('/login.html');
+});
+if ('serviceWorker' in navigator) navigator.serviceWorker.register('/sw.js').catch(() => {});
 refreshHeader();
 render();
